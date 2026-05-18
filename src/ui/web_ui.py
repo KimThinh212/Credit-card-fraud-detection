@@ -484,7 +484,7 @@ def render_sidebar():
             st.info("**Model:** Logistic Regression\n**Features:** 30")
 
         st.markdown("---")
-        st.caption("FraudShield v2.0 | © 2024")
+        st.caption("FraudShield v2.0 | © 2026 Credit Card Protection Team")
 
 
 # ============================================================================
