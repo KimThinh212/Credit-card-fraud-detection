@@ -1,0 +1,82 @@
+# ============================================================================
+# Docker Compose - Credit Card Fraud Detection
+# ============================================================================
+# Định nghĩa 2 services:
+#   1. backend-api: FastAPI (uvicorn) trên cổng 8000
+#   2. frontend-ui: Streamlit trên cổng 8501
+#
+# Cấu hình:
+#   - Network nội bộ để 2 service giao tiếp
+#   - Volume mapping để live-reload khi code thay đổi
+# ============================================================================
+
+version: "3.8"
+
+services:
+  # ==========================================================================
+  # Backend API - FastAPI + Uvicorn
+  # ==========================================================================
+  backend-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fraud-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source code để live-reload
+      - ./src:/app/src
+      # Mount dữ liệu
+      - ./data:/app/data
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+    command: >
+      uvicorn src.app:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --log-level info
+    networks:
+      - fraud-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ==========================================================================
+  # Frontend UI - Streamlit
+  # ==========================================================================
+  frontend-ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fraud-frontend
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+    command: >
+      streamlit run src/web_ui.py
+      --server.port=8501
+      --server.address=0.0.0.0
+      --server.enableCORS=true
+    depends_on:
+      - backend-api
+    networks:
+      - fraud-network
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  fraud-network:
+    driver: bridge
