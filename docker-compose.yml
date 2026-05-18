@@ -10,8 +10,6 @@
 #   - Volume mapping để live-reload khi code thay đổi
 # ============================================================================
 
-version: "3.8"
-
 services:
   # ==========================================================================
   # Backend API - FastAPI + Uvicorn
@@ -41,7 +39,7 @@ services:
     networks:
       - fraud-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

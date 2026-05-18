@@ -89,7 +89,7 @@ class TransactionOutput(BaseModel):
 
 model_weights: Optional[np.ndarray] = None
 model_bias: float = 0.0
-feature_order: List[str] = [f"V{i}" for i in range(1, 29)] + ["Time", "Amount"]
+feature_order: List[str] = [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"]
 scaler_mean: Optional[pd.Series] = None
 scaler_std: Optional[pd.Series] = None
 
@@ -100,25 +100,27 @@ scaler_std: Optional[pd.Series] = None
 
 def compute_time_stats():
     """
-    Tính mean và std của Time và Amount từ dữ liệu full (nếu có).
+    Tính mean và std của Time và Amount từ dữ liệu gốc (raw CSV).
     Dùng để chuẩn hóa dữ liệu đầu vào giống như trong quá trình training.
     
-    Nếu không tìm thấy file thống kê, dùng giá trị mặc định từ
+    Nếu không tìm thấy raw CSV, dùng giá trị mặc định từ
     phân phối của Credit Card Fraud Detection dataset.
     """
     global scaler_mean, scaler_std
 
-    stats_path = os.path.join(project_root, "data", "processed", "full_scaled.csv")
-    if os.path.exists(stats_path):
-        df = pd.read_csv(stats_path)
+    raw_path = os.path.join(project_root, "data", "raw", "creditcard.csv")
+    if os.path.exists(raw_path):
+        df = pd.read_csv(raw_path, usecols=["Time", "Amount"])
         scaler_mean = df[["Time", "Amount"]].mean()
         scaler_std = df[["Time", "Amount"]].std()
-        logger.info("Đã tính mean/std từ dữ liệu full.")
+        logger.info(f"Đã tính mean/std từ raw data: "
+                     f"Time(mean={scaler_mean['Time']:.2f}, std={scaler_std['Time']:.2f}), "
+                     f"Amount(mean={scaler_mean['Amount']:.2f}, std={scaler_std['Amount']:.2f})")
     else:
         # Giá trị mặc định từ dataset (tham khảo từ EDA phổ biến)
         scaler_mean = pd.Series({"Time": 75000.0, "Amount": 88.0})
         scaler_std = pd.Series({"Time": 48000.0, "Amount": 250.0})
-        logger.warning("Không tìm thấy full_scaled.csv, dùng giá trị mặc định cho scaling.")
+        logger.warning("Không tìm thấy raw CSV, dùng giá trị mặc định cho scaling.")
 
 
 def scale_input_time_amount(time: float, amount: float):

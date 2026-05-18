@@ -2,7 +2,7 @@
 Huấn luyện mô hình Credit Card Fraud Detection sử dụng Apache SystemDS
 Chức năng:
   - Đọc dữ liệu Train đã chuẩn hóa từ data/processed/
-  - Huấn luyện mô hình Logistic Regression (l2svm) với SystemDS
+  - Huấn luyện mô hình SVM (l2svm) với SystemDS
   - Lưu ma trận trọng số vào data/processed/model_weights.csv
 """
 
@@ -20,16 +20,13 @@ if project_root not in sys.path:
 import numpy as np
 import pandas as pd
 from systemds.context import SystemDSContext
+from systemds.operator.algorithm import l2svm
 
 
-def read_dataframe_with_spark(data_path, is_label=False):
+def read_dataframe(data_path, is_label=False):
     """
-    Đọc CSV bằng pandas (fallback nếu SystemDS không đọc được trực tiếp).
-    Trả về numpy array.
-    
-    SystemDS có thể đọc CSV trực tiếp qua ctx.read(), nhưng đôi khi
-    cần định dạng đặc biệt. Hàm này đọc bằng pandas và chuyển thành
-    numpy array, sau đó nạp vào SystemDS.
+    Đọc CSV bằng pandas và trả về numpy array.
+    SystemDS cần numpy array để nạp qua ctx.from_numpy().
     """
     df = pd.read_csv(data_path)
     values = df.values.astype(np.float64)
@@ -39,13 +36,13 @@ def read_dataframe_with_spark(data_path, is_label=False):
 
 def train_model():
     """
-    Huấn luyện mô hình sử dụng SystemDS l2svm (binary logistic regression)
-    
+    Huấn luyện mô hình sử dụng SystemDS l2svm (binary SVM with L2 regularization).
+
     Quy trình:
       1. Đọc X_train, y_train từ CSV
       2. Nạp vào SystemDS dưới dạng matrix
-      3. Huấn luyện bằng l2svm (L2-regularized SVM / Logistic Regression)
-      4. Xuất weights và bias
+      3. Huấn luyện bằng l2svm
+      4. Tách bias và feature weights
       5. Lưu vào model_weights.csv
     """
     data_dir = os.path.join(project_root, "data", "processed")
@@ -62,8 +59,8 @@ def train_model():
 
     # Đọc dữ liệu bằng pandas
     logger.info("Đang đọc dữ liệu Train...")
-    X_np = read_dataframe_with_spark(X_train_path, is_label=False)
-    y_np = read_dataframe_with_spark(y_train_path, is_label=True)
+    X_np = read_dataframe(X_train_path, is_label=False)
+    y_np = read_dataframe(y_train_path, is_label=True)
 
     n_samples, n_features = X_np.shape
     logger.info(f"Số lượng mẫu: {n_samples}, Số lượng features: {n_features}")
@@ -71,6 +68,11 @@ def train_model():
     # Chuyển y thành vector 1D nếu cần
     if y_np.ndim > 1 and y_np.shape[1] == 1:
         y_np = y_np.flatten()
+
+    # l2svm yêu cầu labels trong encoding -1/+1 hoặc 1/2.
+    # Dữ liệu hiện tại có Class = 0 (legit) và 1 (fraud).
+    # Chuyển đổi: 0 -> -1, 1 -> +1
+    y_np = np.where(y_np == 0, -1.0, 1.0)
 
     # Khởi tạo SystemDS Context
     with SystemDSContext() as ctx:
@@ -81,44 +83,46 @@ def train_model():
         y = ctx.from_numpy(y_np)
 
         logger.info("Đang huấn luyện mô hình với l2svm...")
-        logger.info("  -> Thuật toán: l2svm (L2-regularized SVM / Logistic Regression)")
-        logger.info("  -> maxi=200 (số vòng lặp tối đa)")
-        logger.info("  -> tol=1e-7 (ngưỡng hội tụ)")
+        logger.info("  -> Thuật toán: l2svm (L2-regularized SVM)")
+        logger.info("  -> maxIterations=200 (số vòng lặp tối đa)")
+        logger.info("  -> epsilon=1e-7 (ngưỡng hội tụ)")
         logger.info("  -> reg=0.001 (hệ số regularization)")
+        logger.info("  -> intercept=True (thêm bias)")
 
         # Huấn luyện mô hình
-        # l2svm trả về: (weights, bias)
-        #   - weights: ma trận (n_features, 1)
-        #   - bias: scalar
-        weights_node, bias_node = ctx.l2svm(
+        # l2svm trả về Matrix weights (shape: n_features+1 x 1 khi intercept=True)
+        # Phần tử đầu tiên là bias, các phần tử còn lại là feature weights
+        weights_matrix = l2svm(
             X, y,
-            maxi=200,    # Số vòng lặp tối đa
-            tol=1e-7,    # Ngưỡng hội tụ
-            reg=0.001    # Hệ số regularization (L2)
+            intercept=True,
+            reg=0.001,
+            maxIterations=200,
+            epsilon=1e-7,
+            verbose=False
         )
 
         # Lấy giá trị numpy
-        weights = weights_node.compute()
-        bias = bias_node.compute()
+        weights_full = weights_matrix.compute()
+
+        # Tách bias và feature weights
+        if weights_full.ndim > 1 and weights_full.shape[1] == 1:
+            weights_full = weights_full.flatten()
+
+        # Phần tử đầu tiên là bias (vì intercept=True)
+        bias = weights_full[0]
+        weights = weights_full[1:]
 
         logger.info(f"Huấn luyện hoàn tất!")
         logger.info(f"Kích thước weights: {weights.shape}")
-        logger.info(f"Bias: {bias}")
-
-        # Chuyển weights thành vector 1D nếu là ma trận cột
-        if weights.ndim == 2 and weights.shape[1] == 1:
-            weights = weights.flatten()
-
-        # Tạo danh sách feature names
-        feature_names = [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"]
+        logger.info(f"Bias (intercept): {bias:.6f}")
 
         # Đảm bảo số lượng weights khớp với số features
+        feature_names = [f"V{i}" for i in range(1, 29)] + ["Time_scaled", "Amount_scaled"]
         if len(weights) != len(feature_names):
             logger.warning(
                 f"Số lượng weights ({len(weights)}) khác với số lượng features ({len(feature_names)}). "
-                f"Sẽ điều chỉnh để phù hợp."
+                f"Sẽ điều chỉnh."
             )
-            # Nếu weights nhiều hơn, lấy số lượng tương ứng
             weights = weights[:len(feature_names)]
 
         # Tạo DataFrame lưu weights
@@ -136,7 +140,7 @@ def train_model():
         logger.info(f"Đã lưu model weights vào {output_path}")
 
         # In ra 10 trọng số quan trọng nhất
-        weights_abs = weights_df.iloc[:-1].copy()  # Bỏ bias
+        weights_abs = weights_df.iloc[:-1].copy()
         weights_abs["abs_weight"] = weights_abs["weight"].abs()
         top_features = weights_abs.nlargest(10, "abs_weight")
         logger.info("Top 10 features quan trọng nhất:")

@@ -26,6 +26,7 @@ from pyspark.sql.functions import col, when, count, rand
 from pyspark.sql.types import DoubleType, IntegerType
 from pyspark.ml.feature import VectorAssembler, StandardScaler
 from pyspark.ml import Pipeline
+from pyspark.ml.functions import vector_to_array
 
 
 def create_spark_session():
@@ -109,9 +110,12 @@ def scale_features(df):
     pipeline_model = pipeline.fit(df)
     scaled_df = pipeline_model.transform(df)
 
-    # Tách vector scaled thành các cột riêng
-    scaled_df = scaled_df.withColumn("Time_scaled", col("scaled_time_amount")[0])
-    scaled_df = scaled_df.withColumn("Amount_scaled", col("scaled_time_amount")[1])
+    # Chuyển vector sparse/dense thành array rồi tách thành các cột riêng
+    scaled_df = scaled_df.withColumn(
+        "scaled_array", vector_to_array(col("scaled_time_amount"))
+    )
+    scaled_df = scaled_df.withColumn("Time_scaled", col("scaled_array")[0])
+    scaled_df = scaled_df.withColumn("Amount_scaled", col("scaled_array")[1])
 
     logger.info("Chuẩn hóa hoàn tất.")
     return scaled_df
