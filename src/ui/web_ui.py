@@ -568,12 +568,13 @@ def render_dashboard():
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.markdown("#### 📊 Giao dịch theo thời gian (mô phỏng)")
         timeline = df.copy()
-        timeline["idx"] = range(len(timeline))
-        fig = px.line(
-            timeline.sort_values("Time"),
-            x="idx", y="Amount", color="Class",
-            color_discrete_map={0: "rgba(16,185,129,0.5)", 1: "#EF4444"},
-            markers=False,
+        timeline = timeline.sort_values("Time")
+        timeline["tx_index"] = range(len(timeline))
+        fig = px.scatter(
+            timeline, x="tx_index", y="Amount", color="Class",
+            color_discrete_map={0: "rgba(16,185,129,0.3)", 1: "#EF4444"},
+            opacity=0.6, size_max=8,
+            labels={"tx_index": "Giao dịch (theo thời gian)", "Amount": "Số tiền (USD)"},
         )
         fig = apply_dark_layout(fig, height=280)
         fig.update_layout(showlegend=False)
@@ -605,6 +606,18 @@ def render_prediction_form():
         unsafe_allow_html=True,
     )
 
+    # Lấy dữ liệu random từ session_state TRƯỚC khi tạo widgets
+    rand_tx = st.session_state.get("random_transaction")
+    default_amount = rand_tx.get("Amount", 100.0) if rand_tx else 100.0
+    default_time = rand_tx.get("Time", 75000.0) if rand_tx else 75000.0
+    default_v = {}
+    if rand_tx:
+        for i in range(1, 29):
+            default_v[f"V{i}"] = rand_tx.get(f"V{i}", 0.0)
+    else:
+        for i in range(1, 29):
+            default_v[f"V{i}"] = 0.0
+
     col_left, col_right = st.columns([3, 2])
 
     with col_left:
@@ -614,10 +627,10 @@ def render_prediction_form():
         r1, r2 = st.columns(2)
         with r1:
             amount = st.number_input("💰 Amount ($)", min_value=0.0, max_value=50000.0,
-                                     value=100.0, step=1.0, format="%.2f")
+                                     value=default_amount, step=1.0, format="%.2f")
         with r2:
             time_val = st.number_input("⏱ Time (giây)", min_value=0.0, max_value=200000.0,
-                                       value=75000.0, step=1.0, format="%.2f")
+                                       value=default_time, step=1.0, format="%.2f")
 
         tx_id = st.text_input("🔖 Mã giao dịch (tùy chọn)", placeholder="TX-...",
                               value=f"TX-{datetime.now().strftime('%H%M%S')}")
@@ -631,13 +644,13 @@ def render_prediction_form():
                     if idx <= 28:
                         with cols[c]:
                             v_values[f"V{idx}"] = st.number_input(
-                                f"V{idx}", value=0.0, min_value=-10.0, max_value=10.0,
+                                f"V{idx}", value=default_v.get(f"V{idx}", 0.0),
+                                min_value=-10.0, max_value=10.0,
                                 step=0.01, format="%.4f", key=f"pred_v{idx}",
                             )
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    is_random_loaded = False
     with col_left:
         b1, b2, b3 = st.columns(3)
         with b1:
@@ -648,27 +661,21 @@ def render_prediction_form():
             predict_btn = st.button("🚀 Phân tích", type="primary", use_container_width=True)
 
     if rand_normal:
-        rand_data = generate_normal_transaction()
-        st.session_state["random_transaction"] = rand_data
-        is_random_loaded = True
+        st.session_state["random_transaction"] = generate_normal_transaction()
+        st.session_state.pop("predict_result", None)
         st.rerun()
 
     if rand_sus:
-        rand_data = generate_suspicious_transaction()
-        st.session_state["random_transaction"] = rand_data
-        is_random_loaded = True
+        st.session_state["random_transaction"] = generate_suspicious_transaction()
+        st.session_state.pop("predict_result", None)
         st.rerun()
 
-    if st.session_state.get("random_transaction"):
-        rt = st.session_state["random_transaction"]
-        amount = rt.get("Amount", amount)
-        time_val = rt.get("Time", time_val)
-        for k, v in rt.items():
-            if k.startswith("V"):
-                v_values[k] = v
-        st.info(f"🎲 Giao dịch ngẫu nhiên: Amount=${amount:.2f}, Time={time_val:.0f}s")
+    if rand_tx:
+        st.info(f"🎲 Giao dịch ngẫu nhiên: Amount=${default_amount:.2f}, Time={default_time:.0f}s")
 
     with col_right:
+        stored = st.session_state.get("predict_result")
+
         if predict_btn:
             transaction = {
                 **{f"V{i}": v_values.get(f"V{i}", 0.0) for i in range(1, 29)},
@@ -682,60 +689,74 @@ def render_prediction_form():
                 result = call_api("/predict", method="POST", json_data=transaction)
 
             if result:
-                is_fraud = result["is_fraud"]
-                probability = result["fraud_probability"]
-                risk_level = result["risk_level"]
-                prob_pct = probability * 100
-
-                gauge_color = "#EF4444" if risk_level == "High" else "#F59E0B" if risk_level == "Medium" else "#10B981"
-                fig = build_gauge_chart(prob_pct, gauge_color)
-                st.plotly_chart(fig, use_container_width=True)
-
-                if risk_level == "High":
-                    st.markdown(
-                        f'<div class="alert-fraud">🚨 GIAN LẬN – {prob_pct:.2f}%</div>',
-                        unsafe_allow_html=True,
-                    )
-                elif risk_level == "Medium":
-                    st.markdown(
-                        f'<div class="alert-medium-box">⚠️ NGHI VẤN – {prob_pct:.2f}%</div>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.markdown(
-                        f'<div class="alert-safe">✅ AN TOÀN – {prob_pct:.2f}%</div>',
-                        unsafe_allow_html=True,
-                    )
-
-                st.markdown(
-                    f'<div style="text-align:center; margin-top:0.5rem;">{format_risk_badge(risk_level)}</div>',
-                    unsafe_allow_html=True,
-                )
-
-                if is_fraud:
-                    st.balloons()
-                else:
-                    st.snow()
+                st.session_state["predict_result"] = result
+                st.session_state["predict_tx_id"] = tx_id
+                st.session_state["predict_amount"] = amount
+                st.session_state["predict_just_now"] = True
 
                 history = st.session_state.get("history", [])
                 history.append({
                     "id": tx_id or f"TX-{len(history)+1:04d}",
                     "timestamp": datetime.now().strftime("%H:%M:%S"),
                     "amount": amount,
-                    "is_fraud": is_fraud,
-                    "probability": probability,
-                    "risk_level": risk_level,
+                    "is_fraud": result["is_fraud"],
+                    "probability": result["fraud_probability"],
+                    "risk_level": result["risk_level"],
                 })
                 st.session_state["history"] = history
 
-                with st.expander("🔎 Chi tiết"):
-                    st.json({
-                        "is_fraud": is_fraud,
-                        "fraud_probability": probability,
-                        "risk_level": risk_level,
-                        "transaction_id": tx_id,
-                        "input": {"Amount": amount, "Time": time_val},
-                    })
+                st.rerun()
+
+        stored = st.session_state.get("predict_result")
+        if stored:
+            is_fraud = stored["is_fraud"]
+            probability = stored["fraud_probability"]
+            risk_level = stored["risk_level"]
+            prob_pct = probability * 100
+
+            # Animation chỉ chạy 1 lần khi result mới
+            if st.session_state.get("predict_just_now"):
+                if is_fraud:
+                    st.balloons()
+                else:
+                    st.snow()
+                st.session_state["predict_just_now"] = False
+
+            gauge_color = "#EF4444" if risk_level == "High" else "#F59E0B" if risk_level == "Medium" else "#10B981"
+            fig = build_gauge_chart(prob_pct, gauge_color)
+            st.plotly_chart(fig, use_container_width=True)
+
+            if risk_level == "High":
+                st.markdown(
+                    f'<div class="alert-fraud">🚨 GIAN LẬN – {prob_pct:.2f}%</div>',
+                    unsafe_allow_html=True,
+                )
+            elif risk_level == "Medium":
+                st.markdown(
+                    f'<div class="alert-medium-box">⚠️ NGHI VẤN – {prob_pct:.2f}%</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<div class="alert-safe">✅ AN TOÀN – {prob_pct:.2f}%</div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                f'<div style="text-align:center; margin-top:0.5rem;">{format_risk_badge(risk_level)}</div>',
+                unsafe_allow_html=True,
+            )
+
+            with st.expander("🔎 Chi tiết"):
+                tx_display = st.session_state.get("predict_tx_id", "N/A")
+                amt_display = st.session_state.get("predict_amount", 0.0)
+                st.json({
+                    "is_fraud": is_fraud,
+                    "fraud_probability": probability,
+                    "risk_level": risk_level,
+                    "transaction_id": tx_display,
+                    "input": {"Amount": amt_display},
+                })
 
         else:
             st.markdown(
