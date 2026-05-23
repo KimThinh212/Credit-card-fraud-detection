@@ -14,7 +14,6 @@ import os
 import sys
 import json
 import random
-import time
 import base64
 from pathlib import Path
 from datetime import datetime
@@ -606,17 +605,14 @@ def render_prediction_form():
         unsafe_allow_html=True,
     )
 
-    # Lấy dữ liệu random từ session_state TRƯỚC khi tạo widgets
     rand_tx = st.session_state.get("random_transaction")
-    default_amount = rand_tx.get("Amount", 100.0) if rand_tx else 100.0
-    default_time = rand_tx.get("Time", 75000.0) if rand_tx else 75000.0
-    default_v = {}
+
+    # Gán giá trị từ rand_tx vào session_state để widgets cập nhật
     if rand_tx:
+        st.session_state["pred_amount"] = rand_tx.get("Amount", 100.0)
+        st.session_state["pred_time"] = rand_tx.get("Time", 75000.0)
         for i in range(1, 29):
-            default_v[f"V{i}"] = rand_tx.get(f"V{i}", 0.0)
-    else:
-        for i in range(1, 29):
-            default_v[f"V{i}"] = 0.0
+            st.session_state[f"pred_v{i}"] = rand_tx.get(f"V{i}", 0.0)
 
     col_left, col_right = st.columns([3, 2])
 
@@ -627,10 +623,10 @@ def render_prediction_form():
         r1, r2 = st.columns(2)
         with r1:
             amount = st.number_input("💰 Amount ($)", min_value=0.0, max_value=50000.0,
-                                     value=default_amount, step=1.0, format="%.2f")
+                                     value=100.0, step=1.0, format="%.2f", key="pred_amount")
         with r2:
             time_val = st.number_input("⏱ Time (giây)", min_value=0.0, max_value=200000.0,
-                                       value=default_time, step=1.0, format="%.2f")
+                                       value=75000.0, step=1.0, format="%.2f", key="pred_time")
 
         tx_id = st.text_input("🔖 Mã giao dịch (tùy chọn)", placeholder="TX-...",
                               value=f"TX-{datetime.now().strftime('%H%M%S')}")
@@ -644,7 +640,7 @@ def render_prediction_form():
                     if idx <= 28:
                         with cols[c]:
                             v_values[f"V{idx}"] = st.number_input(
-                                f"V{idx}", value=default_v.get(f"V{idx}", 0.0),
+                                f"V{idx}", value=0.0,
                                 min_value=-10.0, max_value=10.0,
                                 step=0.01, format="%.4f", key=f"pred_v{idx}",
                             )
@@ -671,7 +667,7 @@ def render_prediction_form():
         st.rerun()
 
     if rand_tx:
-        st.info(f"🎲 Giao dịch ngẫu nhiên: Amount=${default_amount:.2f}, Time={default_time:.0f}s")
+        st.info(f"🎲 Giao dịch ngẫu nhiên: Amount=${rand_tx.get('Amount', 0):.2f}, Time={rand_tx.get('Time', 0):.0f}s")
 
     with col_right:
         stored = st.session_state.get("predict_result")
@@ -685,14 +681,12 @@ def render_prediction_form():
             }
 
             with st.spinner("🔄 Đang phân tích..."):
-                time.sleep(0.5)
                 result = call_api("/predict", method="POST", json_data=transaction)
 
             if result:
                 st.session_state["predict_result"] = result
                 st.session_state["predict_tx_id"] = tx_id
                 st.session_state["predict_amount"] = amount
-                st.session_state["predict_just_now"] = True
 
                 history = st.session_state.get("history", [])
                 history.append({
@@ -713,14 +707,6 @@ def render_prediction_form():
             probability = stored["fraud_probability"]
             risk_level = stored["risk_level"]
             prob_pct = probability * 100
-
-            # Animation chỉ chạy 1 lần khi result mới
-            if st.session_state.get("predict_just_now"):
-                if is_fraud:
-                    st.balloons()
-                else:
-                    st.snow()
-                st.session_state["predict_just_now"] = False
 
             gauge_color = "#EF4444" if risk_level == "High" else "#F59E0B" if risk_level == "Medium" else "#10B981"
             fig = build_gauge_chart(prob_pct, gauge_color)

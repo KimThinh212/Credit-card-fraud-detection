@@ -11,7 +11,6 @@ import os
 import sys
 import json
 import random
-import time
 from typing import Optional
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -538,7 +537,6 @@ def render_prediction_form():
         }
 
         with st.spinner("🔄 Đang phân tích giao dịch..."):
-            time.sleep(0.5)  # Tạo hiệu ứng loading
             result = call_predict_api(transaction)
 
         if result:
@@ -570,7 +568,6 @@ def render_prediction_form():
                     unsafe_allow_html=True
                 )
                 st.success("Giao dịch này có vẻ an toàn!")
-                st.snow()
             elif risk_level == "Medium":
                 st.markdown(
                     f"""<div class="alert-medium">
@@ -587,7 +584,6 @@ def render_prediction_form():
                     unsafe_allow_html=True
                 )
                 st.error("Phát hiện giao dịch gian lận!")
-                st.balloons()
 
             # Chi tiết
             with st.expander("🔎 Xem chi tiết phân tích"):

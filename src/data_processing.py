@@ -132,11 +132,12 @@ def prepare_features(scaled_df):
     return feature_df, feature_cols, label_col
 
 
-def balance_data(feature_df, label_col, seed=42):
+def balance_data(feature_df, label_col, seed=42, sampling_ratio=10):
     """
-    Xử lý mất cân bằng dữ liệu bằng phương pháp undersampling
-    - Lấy tất cả các mẫu của class thiểu số (fraud = 1)
-    - Random sample từ class đa số (legit = 0) với số lượng tương ứng
+    Xử lý mất cân bằng dữ liệu bằng phương pháp stratified sampling
+    - Lấy TẤT CẢ các mẫu của class thiểu số (fraud = 1)
+    - Random sample từ class đa số (legit = 0) với tỷ lệ sampling_ratio:1
+      (sampling_ratio legit cho mỗi 1 fraud, giúp tăng lượng dữ liệu training)
     """
     logger.info("Đang xử lý mất cân bằng dữ liệu...")
 
@@ -155,8 +156,12 @@ def balance_data(feature_df, label_col, seed=42):
     fraud_df = feature_df.filter(col(label_col) == 1)
     legit_df = feature_df.filter(col(label_col) == 0)
 
-    # Undersampling: lấy mẫu từ class đa số bằng với số lượng class thiểu số
-    sample_fraction = fraud_count / legit_count
+    # Stratified sampling: giữ ALL fraud, sample legit với tỷ lệ sampling_ratio:1
+    target_legit_count = fraud_count * sampling_ratio
+    if target_legit_count > legit_count:
+        target_legit_count = legit_count
+
+    sample_fraction = target_legit_count / legit_count
     legit_sampled = legit_df.sample(False, sample_fraction, seed=seed)
 
     # Gộp lại
@@ -167,7 +172,8 @@ def balance_data(feature_df, label_col, seed=42):
 
     final_legit = balanced_df.filter(col(label_col) == 0).count()
     final_fraud = balanced_df.filter(col(label_col) == 1).count()
-    logger.info(f"Sau undersampling - Hợp lệ: {final_legit}, Gian lận: {final_fraud}")
+    logger.info(f"Sau stratified sampling (ratio={sampling_ratio}:1) - Hợp lệ: {final_legit}, Gian lận: {final_fraud}")
+    logger.info(f"Tổng số mẫu training: {final_legit + final_fraud}")
     logger.info(f"Dữ liệu đã được cân bằng.")
 
     return balanced_df
@@ -293,8 +299,8 @@ def main():
         # Lưu full data đã scale (phục vụ dashboard)
         process_and_save_balanced(scaled_df, feature_cols, label_col, output_balanced_dir)
 
-        # Bước 4: Xử lý mất cân bằng (undersampling)
-        balanced_df = balance_data(feature_df, label_col)
+        # Bước 4: Xử lý mất cân bằng (stratified sampling, ratio 10:1 legit:fraud)
+        balanced_df = balance_data(feature_df, label_col, sampling_ratio=10)
 
         # Bước 5: Chia Train/Test và lưu
         save_train_test(balanced_df, feature_cols, label_col, output_dir)

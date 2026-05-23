@@ -135,6 +135,7 @@ class ExplainOutput(BaseModel):
 
 
 class ModelInfoOutput(BaseModel):
+    model_config = {'protected_namespaces': ()}
     num_features: int
     top_10_weights: List[dict]
     bias: float
